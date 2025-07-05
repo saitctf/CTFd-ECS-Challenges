@@ -535,14 +535,24 @@ def get_address_of_task_container(ecs, task, container_name):
         aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
     )
 
-    task = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[task])["tasks"][0]
+    task_response = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[task])
+    
+    if not task_response["tasks"]:
+        return None
+        
+    task = task_response["tasks"][0]
 
     if ecs.guacamole_address:
         containers = task["containers"]
 
         container = list(
             filter(lambda container: container["name"] == container_name, containers)
-        )[0]
+        )
+        
+        if not container:
+            return None
+            
+        container = container[0]
 
         network_interfaces = container["networkInterfaces"]
 
@@ -560,13 +570,23 @@ def get_address_of_task_container(ecs, task, container_name):
                 lambda attachment: attachment["type"] == "ElasticNetworkInterface",
                 attachments,
             )
-        )[0]
+        )
+        
+        if not eni:
+            return None
+            
+        eni = eni[0]
 
         details = eni["details"]
 
         eni_id = list(
             filter(lambda detail: detail["name"] == "networkInterfaceId", details)
-        )[0]["value"]
+        )
+        
+        if not eni_id:
+            return None
+            
+        eni_id = eni_id[0]["value"]
 
         eni = boto3.resource(
             "ec2",
@@ -575,6 +595,9 @@ def get_address_of_task_container(ecs, task, container_name):
             aws_secret_access_key=ecs.aws_secret_access_key,
             aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
         ).NetworkInterface(eni_id)
+
+        if "association_attribute" not in eni.__dict__ or "PublicIp" not in eni.association_attribute:
+            return None
 
         return eni.association_attribute["PublicIp"]
 
@@ -1112,7 +1135,9 @@ class TaskAPI(Resource):
             db.session.add(entry)
             db.session.commit()
             db.session.close()
-            return {"success": True, "data": []}
+            
+            # Return the task ARN so the frontend can use it for status checking
+            return {"success": True, "data": {"task_arn": result["tasks"][0]["taskArn"]}}
         else:
             db.session.commit()
             db.session.close()
@@ -1156,28 +1181,47 @@ class TaskStatus(Resource):
             if challenge_tracker.owner_id != session.id:
                 return {"success": False, "data": []}
 
-        task = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[taskInstance])[
-            "tasks"
-        ][0]
+        try:
+            task_response = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[taskInstance])
+            
+            if not task_response["tasks"]:
+                return {"success": False, "data": {"error": "Task not found"}}
+            
+            task = task_response["tasks"][0]
+            
+            # Check if task is in a running state
+            if task["lastStatus"] not in ["RUNNING", "PENDING"]:
+                return {"success": False, "data": {"error": f"Task is in {task['lastStatus']} state"}}
 
-        containers = [
-            container
-            for container in task["containers"]
-            if container["name"] in [challenge.ssh_container, challenge.vnc_container]
-            and container["healthStatus"] != "HEALTHY"
-        ]
+            containers = [
+                container
+                for container in task["containers"]
+                if container["name"] in [challenge.ssh_container, challenge.vnc_container]
+                and container["healthStatus"] != "HEALTHY"
+            ]
 
-        return {
-            "success": True,
-            "data": {"healthy": not any(containers)},
-            "public_ip": get_address_of_task_container(
-                ecs,
-                taskInstance,
-                challenge.entrypoint_container,
-            )
-            if not ecs.guacamole_address
-            else "",
-        }
+            # Get the public IP if the task is healthy and not using guacamole
+            public_ip = ""
+            if not ecs.guacamole_address and not any(containers):
+                try:
+                    public_ip = get_address_of_task_container(
+                        ecs,
+                        taskInstance,
+                        challenge.entrypoint_container,
+                    )
+                    print(f"Retrieved public IP: {public_ip} for task {taskInstance}")
+                except Exception as e:
+                    # If we can't get the IP yet, that's okay - the task might still be starting
+                    print(f"Could not get IP for task {taskInstance}: {str(e)}")
+                    public_ip = ""
+
+            return {
+                "success": True,
+                "data": {"healthy": not any(containers)},
+                "public_ip": public_ip,
+            }
+        except Exception as e:
+            return {"success": False, "data": {"error": str(e)}}
 
 
 container_namespace = Namespace(
