@@ -48,21 +48,10 @@ function get_ecs_status(challenge) {
                 let connect_section = document.querySelector("#" + String(item.instance_id).replaceAll(":", "_").replaceAll("/", "_") + "_connect_to_container");
 
                 let initSecond = Math.floor(new Date().getTime() / 1000);
-                let maxWaitTime = 120; // Maximum wait time in seconds (2 minutes)
 
                 let status_check_interval = setInterval(function () {
                     let currentSecond = Math.floor(new Date().getTime() / 1000);
                     let deltaSecond = Math.floor((currentSecond - initSecond) / 5);
-                    let elapsedTime = currentSecond - initSecond;
-                    
-                    // Check if we've exceeded the maximum wait time
-                    if (elapsedTime > maxWaitTime) {
-                        clearInterval(status_check_interval);
-                        connect_section.innerHTML = `<span style="color: red;">Container failed to start within the expected time. Please try again.</span>`;
-                        revert_section.innerHTML = `<a onclick="start_container('${item.challenge_id}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a>`;
-                        return;
-                    }
-                    
                     let funny_words = [
                         'Provisioning ECS tasks...',
                         'Creating Security Groups...',
@@ -88,13 +77,7 @@ function get_ecs_status(challenge) {
                                     } else {
                                         connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                                     }
-                                } else {
-                                    // Task status check failed, but continue polling
-                                    connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                                 }
-                            }).catch(error => {
-                                // Network error, continue polling
-                                connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                             });
                         }
                     } else {
@@ -109,13 +92,7 @@ function get_ecs_status(challenge) {
                                     } else {
                                         connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                                     }
-                                } else {
-                                    // Task status check failed, but continue polling
-                                    connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                                 }
-                            }).catch(error => {
-                                // Network error, continue polling
-                                connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                             });
                         }
                     }
@@ -148,12 +125,9 @@ function start_container(challenge) {
             } else {
                 ezal({ title: "Failed to start challenge", body: result.data[0], button: "Dismiss" });
             }
-        } else {
-            // Task created successfully, start polling for status with a small delay
-            setTimeout(() => {
-                get_ecs_status(challenge);
-            }, 2000); // Wait 2 seconds for the task to be available in ECS
         }
+
+        get_ecs_status(challenge);
     });
 }
 
