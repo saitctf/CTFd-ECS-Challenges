@@ -28,6 +28,9 @@ class ECSConfig(db.Model):
 
     guide_enabled = db.Column("guide_enabled", db.Boolean())
 
+    entrypoint_container = db.Column(db.String(512), nullable=True)
+
+
 
 class ECSChallengeTracker(db.Model):
     """
