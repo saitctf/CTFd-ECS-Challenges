@@ -86,11 +86,10 @@ from CTFd.utils.config import get_themes
 
 import os
 
-from telnetlib import ENCRYPT
 from datetime import datetime, timedelta
-from Crypto.Hash import HMAC, SHA256
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
 from base64 import b64encode
 import uuid
 
@@ -104,13 +103,17 @@ class guacamole:
     @staticmethod
     def encryptJWT(key, data):
         key = bytes.fromhex(key)
-        h = HMAC.new(key, digestmod=SHA256)
+        h = hmac.HMAC(key, hashes.SHA256())
         h.update(bytes(data, "UTF-8"))
-        sig = h.digest()
+        sig = h.finalize()
         payload = sig + bytes(data, "UTF-8")
-        iv = b"\0" * AES.block_size
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        return b64encode(cipher.encrypt(pad(payload, AES.block_size)))
+        iv = b"\0" * 16  # AES block size is 16 bytes
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        padder = padding.PKCS7(128).padder()
+        padded_data = padder.update(payload) + padder.finalize()
+        encrypted = encryptor.update(padded_data) + encryptor.finalize()
+        return b64encode(encrypted)
 
     @staticmethod
     def createJSON(ID, IP_ADDRESS, PROTOCOL, RECORDING_NAME):
