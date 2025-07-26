@@ -1151,13 +1151,18 @@ class TaskStatus(Resource):
             instance_id=taskInstance
         ).first()
 
+        if not challenge_tracker:
+            return {"success": False, "data": []}
+
+        if challenge_tracker.owner_id != session.id:
+            return {"success": False, "data": []}
+
         challenge = ECSChallenge.query.filter_by(
             id=challenge_tracker.challenge_id
         ).first()
 
-        if not challenge_tracker:
-            if challenge_tracker.owner_id != session.id:
-                return {"success": False, "data": []}
+        if not challenge:
+            return {"success": False, "data": []}
 
         task = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[taskInstance])[
             "tasks"
