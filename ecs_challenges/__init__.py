@@ -411,6 +411,9 @@ class KillTaskAPI(Resource):
 
 # For the ECS Config Page. Gets the list of task definitions available on the ECS cluster.
 def get_task_definitions(ecs):
+    if ecs is None:
+        return []
+        
     ecs_client = boto3.client(
         "ecs",
         ecs.region,
@@ -433,6 +436,9 @@ def get_task_definitions(ecs):
 
 
 def get_clusters(ecs):
+    if ecs is None:
+        return []
+        
     ecs_client = boto3.client(
         "ecs",
         ecs.region,
@@ -449,6 +455,9 @@ def get_clusters(ecs):
 
 
 def get_vpcs(ecs):
+    if ecs is None:
+        return []
+        
     ec2_client = boto3.client(
         "ec2",
         ecs.region,
@@ -473,6 +482,9 @@ def get_vpcs(ecs):
 
 
 def get_subnets(ecs, vpc):
+    if ecs is None:
+        return []
+        
     ec2_client = boto3.client(
         "ec2",
         ecs.region,
@@ -505,6 +517,9 @@ def get_subnets(ecs, vpc):
 
 
 def get_security_groups(ecs, vpc):
+    if ecs is None:
+        return []
+        
     ec2_client = boto3.client(
         "ec2",
         ecs.region,
@@ -530,6 +545,9 @@ def get_security_groups(ecs, vpc):
 
 
 def get_address_of_task_container(ecs, task, container_name):
+    if ecs is None:
+        return None
+        
     ecs_client = boto3.client(
         "ecs",
         ecs.region,
@@ -583,6 +601,9 @@ def get_address_of_task_container(ecs, task, container_name):
 
 
 def stop_task(ecs, task_id):
+    if ecs is None:
+        return
+        
     ecs_client = boto3.client(
         "ecs",
         region_name=ecs.region,
@@ -620,6 +641,9 @@ def stop_task(ecs, task_id):
 def create_task(
     ecs, task_definition, subnets, security_group, challenge_id, random_flag
 ):
+    if ecs is None:
+        return False, ["ECS configuration not found!"]
+        
     ecs_client = boto3.client(
         "ecs",
         region_name=ecs.region,
@@ -1359,6 +1383,13 @@ class ECSAPI(Resource):
     @admins_only
     def get(self):
         ecs = ECSConfig.query.filter_by(id=1).first()
+        
+        if ecs is None:
+            return {
+                "success": False,
+                "data": [{"name": "ECS Config not found! Please configure ECS settings first."}],
+            }, 400
+            
         images = get_task_definitions(ecs)
         if images:
             data = list()
@@ -1384,16 +1415,16 @@ class ECSConfigAPI(Resource):
     def get(self):
         ecs = ECSConfig.query.filter_by(id=1).first()
 
-        if None not in [ecs.subnets, ecs.security_groups]:
-            subnets = json.loads(ecs.subnets)
-            security_groups = json.loads(ecs.security_groups)
-
-            return {
-                "success": True,
-                "data": {"subnets": subnets, "security_groups": security_groups},
-            }
-        else:
+        if ecs is None or None in [ecs.subnets, ecs.security_groups]:
             return {"success": False, "data": {}}
+        
+        subnets = json.loads(ecs.subnets)
+        security_groups = json.loads(ecs.security_groups)
+
+        return {
+            "success": True,
+            "data": {"subnets": subnets, "security_groups": security_groups},
+        }
 
 
 def load(app):
@@ -1417,10 +1448,10 @@ def load(app):
     # Attempt to perform initial setup of the ECS Config from environment variables
 
     try:
-        ecs = ECSConfig.query.first()
+        ecs = ECSConfig.query.filter_by(id=1).first()
 
         if ecs is None:
-            ecs = ECSConfig()
+            ecs = ECSConfig(id=1)
 
         if "AWS_ACCESS_KEY_ID" in os.environ.keys():
             ecs.aws_access_key_id = os.environ["AWS_ACCESS_KEY_ID"]
