@@ -235,25 +235,22 @@ def define_ecs_admin(app):
             db.session.commit()
             ecs = ECSConfig.query.filter_by(id=1).first()
 
-        try:
-            clusters = get_clusters(ecs)
-        except:
-            print(traceback.print_exc())
-            clusters = list()
-
+        # Test AWS connection and get resources
+        clusters = get_clusters(ecs)
         if len(clusters) == 0:
-            form.clusters.choices = [("ERROR", "Failed to connect to AWS")]
+            if not ecs.region:
+                form.clusters.choices = [("ERROR", "AWS region not configured")]
+            else:
+                form.clusters.choices = [("ERROR", "Failed to connect to AWS - check credentials and region")]
         else:
             form.clusters.choices = [(d, d) for d in clusters]
 
-        try:
-            vpcs = get_vpcs(ecs)
-        except:
-            print(traceback.print_exc())
-            vpcs = list()
-
+        vpcs = get_vpcs(ecs)
         if len(vpcs) == 0:
-            form.vpcs.choices = [("ERROR", "Failed to connect to AWS")]
+            if not ecs.region:
+                form.vpcs.choices = [("ERROR", "AWS region not configured")]
+            else:
+                form.vpcs.choices = [("ERROR", "Failed to connect to AWS - check credentials and region")]
         else:
             form.vpcs.choices = [
                 (d["value"], d["value"] + f" [{d['name']}]" if d["name"] else "")
@@ -416,138 +413,228 @@ class KillTaskAPI(Resource):
 
 
 # For the ECS Config Page. Gets the list of task definitions available on the ECS cluster.
+def validate_aws_config(ecs):
+    """
+    Validate AWS configuration and return status information.
+    Returns a dictionary with validation results.
+    """
+    if ecs is None:
+        return {
+            "valid": False,
+            "errors": ["ECS configuration not found"],
+            "warnings": []
+        }
+    
+    errors = []
+    warnings = []
+    
+    # Check required fields
+    if not ecs.region:
+        errors.append("AWS region is required")
+    if not ecs.cluster:
+        errors.append("AWS cluster is required")
+    if not ecs.active_vpc:
+        errors.append("AWS VPC is required")
+    
+    # Check optional but recommended fields
+    if not ecs.aws_access_key_id and not os.environ.get("AWS_ACCESS_KEY_ID"):
+        warnings.append("AWS access key not configured - using IAM role or environment")
+    if not ecs.aws_secret_access_key and not os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        warnings.append("AWS secret key not configured - using IAM role or environment")
+    
+    # Test AWS connectivity if basic config is present
+    if ecs.region and not errors:
+        try:
+            clusters = get_clusters(ecs)
+            if len(clusters) == 0:
+                errors.append("Cannot connect to AWS - check credentials and permissions")
+        except Exception as e:
+            errors.append(f"AWS connection failed: {str(e)}")
+    
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings
+    }
+
+
 def get_task_definitions(ecs):
     if ecs is None:
         return []
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        print("ERROR: AWS region not configured")
+        return []
         
-    ecs_client = boto3.client(
-        "ecs",
-        ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ecs_client = boto3.client(
+            "ecs",
+            ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    taskDefs = [
-        ecs_client.describe_task_definition(taskDefinition=arn, include=["TAGS"])
-        for arn in ecs_client.list_task_definitions()["taskDefinitionArns"]
-    ]
+        taskDefs = [
+            ecs_client.describe_task_definition(taskDefinition=arn, include=["TAGS"])
+            for arn in ecs_client.list_task_definitions()["taskDefinitionArns"]
+        ]
 
-    return [
-        taskDef["taskDefinition"]["taskDefinitionArn"]
-        for taskDef in taskDefs
-        if not ecs.filter_tag
-        or len(list(filter(lambda tag: tag["key"] == ecs.filter_tag, taskDef["tags"])))
-    ]
+        return [
+            taskDef["taskDefinition"]["taskDefinitionArn"]
+            for taskDef in taskDefs
+            if not ecs.filter_tag
+            or len(list(filter(lambda tag: tag["key"] == ecs.filter_tag, taskDef["tags"])))
+        ]
+    except Exception as e:
+        print(f"ERROR: Failed to get task definitions: {str(e)}")
+        return []
 
 
 def get_clusters(ecs):
     if ecs is None:
         return []
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        print("ERROR: AWS region not configured")
+        return []
         
-    ecs_client = boto3.client(
-        "ecs",
-        ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ecs_client = boto3.client(
+            "ecs",
+            ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    clusters = ecs_client.describe_clusters(
-        clusters=ecs_client.list_clusters()["clusterArns"], include=["TAGS"]
-    )["clusters"]
+        clusters = ecs_client.describe_clusters(
+            clusters=ecs_client.list_clusters()["clusterArns"], include=["TAGS"]
+        )["clusters"]
 
-    return [cluster["clusterArn"] for cluster in clusters]
+        return [cluster["clusterArn"] for cluster in clusters]
+    except Exception as e:
+        print(f"ERROR: Failed to get clusters: {str(e)}")
+        return []
 
 
 def get_vpcs(ecs):
     if ecs is None:
         return []
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        print("ERROR: AWS region not configured")
+        return []
         
-    ec2_client = boto3.client(
-        "ec2",
-        ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ec2_client = boto3.client(
+            "ec2",
+            ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    vpc_descr = ec2_client.describe_vpcs()
+        vpc_descr = ec2_client.describe_vpcs()
 
-    vpcs = vpc_descr["Vpcs"]
+        vpcs = vpc_descr["Vpcs"]
 
-    return [
-        {
-            "value": vpc["VpcId"],
-            "name": tags[0]["Value"]
-            if len(tags := list(filter(lambda tag: tag["Key"] == "Name", vpc["Tags"])))
-            else "",
-        }
-        for vpc in vpcs
-    ]
+        return [
+            {
+                "value": vpc["VpcId"],
+                "name": tags[0]["Value"]
+                if len(tags := list(filter(lambda tag: tag["Key"] == "Name", vpc["Tags"])))
+                else "",
+            }
+            for vpc in vpcs
+        ]
+    except Exception as e:
+        print(f"ERROR: Failed to get VPCs: {str(e)}")
+        return []
 
 
 def get_subnets(ecs, vpc):
     if ecs is None:
         return []
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        print("ERROR: AWS region not configured")
+        return []
         
-    ec2_client = boto3.client(
-        "ec2",
-        ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ec2_client = boto3.client(
+            "ec2",
+            ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    subnets = [
-        subnet
-        for subnet in ec2_client.describe_subnets(
-            Filters=[{"Name": "tag-key", "Values": [ecs.filter_tag]}]
-            if ecs.filter_tag
-            else []
-        )["Subnets"]
-        if subnet["VpcId"] == vpc
-    ]
+        subnets = [
+            subnet
+            for subnet in ec2_client.describe_subnets(
+                Filters=[{"Name": "tag-key", "Values": [ecs.filter_tag]}]
+                if ecs.filter_tag
+                else []
+            )["Subnets"]
+            if subnet["VpcId"] == vpc
+        ]
 
-    return [
-        {
-            "value": subnet["SubnetId"],
-            "name": tags[0]["Value"]
-            if len(
-                tags := list(filter(lambda tag: tag["Key"] == "Name", subnet["Tags"]))
-            )
-            else "",
-        }
-        for subnet in subnets
-    ]
+        return [
+            {
+                "value": subnet["SubnetId"],
+                "name": tags[0]["Value"]
+                if len(
+                    tags := list(filter(lambda tag: tag["Key"] == "Name", subnet["Tags"]))
+                )
+                else "",
+            }
+            for subnet in subnets
+        ]
+    except Exception as e:
+        print(f"ERROR: Failed to get subnets: {str(e)}")
+        return []
 
 
 def get_security_groups(ecs, vpc):
     if ecs is None:
         return []
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        print("ERROR: AWS region not configured")
+        return []
         
-    ec2_client = boto3.client(
-        "ec2",
-        ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ec2_client = boto3.client(
+            "ec2",
+            ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    security_groups = [
-        security_group
-        for security_group in ec2_client.describe_security_groups(
-            Filters=[{"Name": "tag-key", "Values": [ecs.filter_tag]}]
-            if ecs.filter_tag
-            else []
-        )["SecurityGroups"]
-        if security_group["VpcId"] == vpc
-    ]
+        security_groups = [
+            security_group
+            for security_group in ec2_client.describe_security_groups(
+                Filters=[{"Name": "tag-key", "Values": [ecs.filter_tag]}]
+                if ecs.filter_tag
+                else []
+            )["SecurityGroups"]
+            if security_group["VpcId"] == vpc
+        ]
 
-    return [
-        {"value": security_group["GroupId"], "name": security_group["GroupName"]}
-        for security_group in security_groups
-    ]
+        return [
+            {"value": security_group["GroupId"], "name": security_group["GroupName"]}
+            for security_group in security_groups
+        ]
+    except Exception as e:
+        print(f"ERROR: Failed to get security groups: {str(e)}")
+        return []
 
 
 def get_address_of_task_container(ecs, task, container_name):
@@ -649,16 +736,23 @@ def create_task(
 ):
     if ecs is None:
         return False, ["ECS configuration not found!"]
+    
+    # Validate required AWS settings
+    if not ecs.region:
+        return False, ["AWS region not configured. Please configure AWS settings first."]
+    if not ecs.cluster:
+        return False, ["AWS cluster not configured. Please configure AWS settings first."]
         
-    ecs_client = boto3.client(
-        "ecs",
-        region_name=ecs.region,
-        aws_access_key_id=ecs.aws_access_key_id,
-        aws_secret_access_key=ecs.aws_secret_access_key,
-        aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
-    )
+    try:
+        ecs_client = boto3.client(
+            "ecs",
+            region_name=ecs.region,
+            aws_access_key_id=ecs.aws_access_key_id,
+            aws_secret_access_key=ecs.aws_secret_access_key,
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        )
 
-    session = get_current_user()
+        session = get_current_user()
 
     owner = session.name
 
@@ -769,18 +863,21 @@ def create_task(
             if challenge.launch_type == "ec2"
             else [],
         )
-    except Exception as e:
-        print("Failed to start challenge! (Call to run_task threw!)")
-        print(repr(e))
-        return False, ["Internal server error!"]
+        except Exception as e:
+            print("Failed to start challenge! (Call to run_task threw!)")
+            print(repr(e))
+            return False, ["Internal server error!"]
 
-    if any(aws_response["tasks"]):
-        return True, aws_response
-    else:
-        print(
-            "Failed to start challenge! (AWS response returned an empty list of created tasks)"
-        )
-        return False, ["Internal server error!"]
+        if any(aws_response["tasks"]):
+            return True, aws_response
+        else:
+            print(
+                "Failed to start challenge! (AWS response returned an empty list of created tasks)"
+            )
+            return False, ["Internal server error!"]
+    except Exception as e:
+        print(f"ERROR: Failed to create task: {str(e)}")
+        return False, [f"AWS error: {str(e)}"]
 
 
 class ECSChallengeType(BaseChallenge):
@@ -1430,6 +1527,25 @@ class ECSConfigAPI(Resource):
         return {
             "success": True,
             "data": {"subnets": subnets, "security_groups": security_groups},
+        }
+
+
+@ecs_config_namespace.route("/status", methods=["GET"])
+class ECSConfigStatusAPI(Resource):
+    @admins_only
+    def get(self):
+        ecs = ECSConfig.query.filter_by(id=1).first()
+        validation = validate_aws_config(ecs)
+        
+        return {
+            "success": True,
+            "data": {
+                "config_valid": validation["valid"],
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+                "has_guacamole": bool(ecs and ecs.guacamole_address),
+                "has_credentials": bool(ecs and (ecs.aws_access_key_id or os.environ.get("AWS_ACCESS_KEY_ID")))
+            }
         }
 
 
