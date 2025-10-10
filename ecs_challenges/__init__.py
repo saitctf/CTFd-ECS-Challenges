@@ -200,6 +200,12 @@ def define_ecs_admin(app):
         ecs = ECSConfig.query.filter_by(id=1).first()
         form = ECSConfigForm()
 
+        # If no ECS config exists, create one
+        if ecs is None:
+            ecs = ECSConfig(id=1)
+            db.session.add(ecs)
+            db.session.commit()
+
         if request.method == "POST":
             ecs.aws_access_key_id = request.form["aws_access_key_id"] or None
             ecs.aws_secret_access_key = request.form["aws_secret_access_key"] or None
@@ -258,8 +264,8 @@ def define_ecs_admin(app):
             "ecs_config.html",
             config=ecs,
             form=form,
-            active_vpc=ecs.active_vpc,
-            cluster=ecs.cluster,
+            active_vpc=ecs.active_vpc if ecs else None,
+            cluster=ecs.cluster if ecs else None,
         )
 
     app.register_blueprint(admin_ecs_config)

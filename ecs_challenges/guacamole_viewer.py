@@ -15,7 +15,7 @@ def define_guacamole_viewer(app):
     def viewer():
         ecs = ECSConfig.query.filter_by(id=1).first()
 
-        if not ecs.guide_enabled:
+        if ecs is None or not ecs.guide_enabled:
             abort(403)
 
         guacamole_access_token = request.args.get("access_token")
