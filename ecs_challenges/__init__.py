@@ -1317,9 +1317,28 @@ class TaskStatus(Resource):
             print(f"DEBUG: Available trackers: {[t.instance_id for t in ECSChallengeTracker.query.all()]}")
             return {"success": False, "data": [], "error": "No challenge tracker found"}
 
-        if challenge_tracker.owner_id != session.id:
+        # Check for owner match with type conversion
+        owner_match = False
+        try:
+            # Try string comparison
+            if str(challenge_tracker.owner_id) == str(session.id):
+                owner_match = True
+            # Try integer comparison
+            elif int(challenge_tracker.owner_id) == int(session.id):
+                owner_match = True
+        except (ValueError, TypeError):
+            pass
+            
+        if not owner_match:
             print(f"DEBUG: Owner mismatch - tracker owner: {challenge_tracker.owner_id}, session id: {session.id}")
-            return {"success": False, "data": [], "error": "Owner mismatch"}
+            print(f"DEBUG: Session name: {session.name}, Session type: {type(session.id)}")
+            print(f"DEBUG: Tracker owner type: {type(challenge_tracker.owner_id)}")
+            
+            # Allow admins to access any task
+            if is_admin():
+                print(f"DEBUG: Admin override - allowing access to task owned by {challenge_tracker.owner_id}")
+            else:
+                return {"success": False, "data": [], "error": "Owner mismatch"}
 
         challenge = ECSChallenge.query.filter_by(
             id=challenge_tracker.challenge_id
