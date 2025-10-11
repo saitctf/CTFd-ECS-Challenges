@@ -1465,6 +1465,10 @@ class ECSStatus(Resource):
         for i in tracker:
             challenge = ECSChallenge.query.filter_by(id=i.challenge_id).first()
 
+            # Skip if challenge doesn't exist (might have been deleted)
+            if challenge is None:
+                continue
+
             data.append(
                 {
                     "id": i.id,
