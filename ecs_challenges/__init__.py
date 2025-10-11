@@ -638,7 +638,10 @@ def get_security_groups(ecs, vpc):
 
 
 def get_address_of_task_container(ecs, task, container_name):
+    print(f"DEBUG: get_address_of_task_container called with task: {task}, container_name: {container_name}")
+    
     if ecs is None:
+        print("DEBUG: ECS config is None")
         return None
         
     ecs_client = boto3.client(
@@ -649,12 +652,17 @@ def get_address_of_task_container(ecs, task, container_name):
         aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
     )
 
-    task = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[task])["tasks"][0]
+    print(f"DEBUG: Describing task {task} in cluster {ecs.cluster}")
+    task_info = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[task])["tasks"][0]
+    print(f"DEBUG: Task info: {task_info}")
 
     if ecs.guacamole_address:
-        containers = task["containers"]
+        print("DEBUG: Using Guacamole mode - getting private IP")
+        containers = task_info["containers"]
+        print(f"DEBUG: Available containers: {[c['name'] for c in containers]}")
 
         if not container_name:
+            print("DEBUG: No container name provided")
             return None
 
         container = list(
@@ -662,35 +670,55 @@ def get_address_of_task_container(ecs, task, container_name):
         )
         
         if not container:
+            print(f"DEBUG: Container '{container_name}' not found in task")
             return None
             
         container = container[0]
+        print(f"DEBUG: Found container: {container}")
 
         network_interfaces = container["networkInterfaces"]
+        print(f"DEBUG: Network interfaces: {network_interfaces}")
 
         if len(network_interfaces) == 0:
+            print("DEBUG: No network interfaces found")
             return None
 
         network_interface = network_interfaces[0]
-
-        return network_interface["privateIpv4Address"]
+        private_ip = network_interface["privateIpv4Address"]
+        print(f"DEBUG: Returning private IP: {private_ip}")
+        return private_ip
     else:
-        attachments = task["attachments"]
+        print("DEBUG: Using direct mode - getting public IP")
+        attachments = task_info["attachments"]
+        print(f"DEBUG: Task attachments: {attachments}")
 
-        eni = list(
+        eni_attachments = list(
             filter(
                 lambda attachment: attachment["type"] == "ElasticNetworkInterface",
                 attachments,
             )
-        )[0]
+        )
+        
+        if not eni_attachments:
+            print("DEBUG: No ElasticNetworkInterface attachments found")
+            return None
+            
+        eni = eni_attachments[0]
+        print(f"DEBUG: ENI attachment: {eni}")
 
         details = eni["details"]
-
-        eni_id = list(
+        eni_details = list(
             filter(lambda detail: detail["name"] == "networkInterfaceId", details)
-        )[0]["value"]
+        )
+        
+        if not eni_details:
+            print("DEBUG: No networkInterfaceId found in ENI details")
+            return None
+            
+        eni_id = eni_details[0]["value"]
+        print(f"DEBUG: ENI ID: {eni_id}")
 
-        eni = boto3.resource(
+        eni_resource = boto3.resource(
             "ec2",
             ecs.region,
             aws_access_key_id=ecs.aws_access_key_id,
@@ -698,7 +726,13 @@ def get_address_of_task_container(ecs, task, container_name):
             aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
         ).NetworkInterface(eni_id)
 
-        return eni.association_attribute["PublicIp"]
+        try:
+            public_ip = eni_resource.association_attribute["PublicIp"]
+            print(f"DEBUG: Returning public IP: {public_ip}")
+            return public_ip
+        except Exception as e:
+            print(f"DEBUG: Error getting public IP from ENI: {e}")
+            return None
 
 
 def stop_task(ecs, task_id):
@@ -1362,17 +1396,30 @@ class TaskStatus(Resource):
         
         # Get the public IP
         public_ip = ""
+        print(f"DEBUG: Getting public IP - guacamole_address: {ecs.guacamole_address}, entrypoint_container: {ecs.entrypoint_container}")
+        
         if not ecs.guacamole_address and ecs.entrypoint_container:
-            public_ip = get_address_of_task_container(
-                ecs,
-                taskInstance,
-                ecs.entrypoint_container,
-            ) or ""
+            print(f"DEBUG: Attempting to get IP for task: {taskInstance}, container: {ecs.entrypoint_container}")
+            try:
+                public_ip = get_address_of_task_container(
+                    ecs,
+                    taskInstance,
+                    ecs.entrypoint_container,
+                ) or ""
+                print(f"DEBUG: Retrieved IP: {public_ip}")
+            except Exception as e:
+                print(f"DEBUG: Error getting IP: {e}")
+                import traceback
+                traceback.print_exc()
+                public_ip = ""
             
             # Update the host field in the tracker if we got an IP and it's different
             if public_ip and challenge_tracker.host != public_ip:
+                print(f"DEBUG: Updating host field from '{challenge_tracker.host}' to '{public_ip}'")
                 challenge_tracker.host = public_ip
                 db.session.commit()
+        else:
+            print(f"DEBUG: Skipping IP retrieval - guacamole_address: {bool(ecs.guacamole_address)}, entrypoint_container: {bool(ecs.entrypoint_container)}")
 
         return {
             "success": True,
