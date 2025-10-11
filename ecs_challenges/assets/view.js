@@ -112,7 +112,7 @@ function get_ecs_status(challenge) {
 
 function start_container(challenge) {
     running = false;
-    document.querySelector('#ecs_container').innerHTML = '<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i></div>';
+    document.querySelector('#ecs_container').innerHTML = '<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i><br><small>Starting challenge...</small></div>';
     fetch(`/api/v1/task?${new URLSearchParams({ 'id': challenge })}`).then(result => result.json()).then(result => {
         if (!result.success) {
             if (result.data[0].indexOf("running") > 0) {
@@ -125,10 +125,111 @@ function start_container(challenge) {
             } else {
                 ezal({ title: "Failed to start challenge", body: result.data[0], button: "Dismiss" });
             }
+        } else {
+            // Task started successfully, now wait for IP
+            wait_for_ip_and_show_status(challenge);
         }
-
-        get_ecs_status(challenge);
     });
+}
+
+function wait_for_ip_and_show_status(challenge) {
+    let attempts = 0;
+    const maxAttempts = 60; // 60 seconds timeout
+    const checkInterval = 1000; // Check every second
+    
+    const checkForIP = () => {
+        attempts++;
+        
+        // Update spinner message
+        const statusMessages = [
+            'Provisioning challenge...',
+            'Getting stuff ready...',
+            'Injecting stuff...',
+            'Downloading viruses to your computer...',
+            'Almost ready...',
+            'Need coffee...',
+            'Killing time...'
+        ];
+        const messageIndex = Math.min(Math.floor(attempts / 10), statusMessages.length - 1);
+        document.querySelector('#ecs_container').innerHTML = 
+            `<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i><br><small>${statusMessages[messageIndex]}</small></div>`;
+        
+        // Check if task is running and get status
+        fetch("/api/v1/ecs_status").then(result => result.json()).then(result => {
+            const taskItem = result['data'].find(item => item.challenge_id == challenge);
+            
+            if (taskItem) {
+                // Task exists, check its status
+                fetch(`/api/v1/task_status?${new URLSearchParams({ taskInst: taskItem.instance_id })}`)
+                    .then(result => result.json())
+                    .then(statusResult => {
+                        if (statusResult['success']) {
+                            if (statusResult['data']['healthy']) {
+                                // Task is healthy, check if we have an IP
+                                if (statusResult['public_ip'] && statusResult['public_ip'].trim() !== '') {
+                                    // We have an IP! Show the final status
+                                    show_final_status(challenge, taskItem, statusResult['public_ip']);
+                                    return;
+                                }
+                            }
+                        }
+                        
+                        // No IP yet, continue checking
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkForIP, checkInterval);
+                        } else {
+                            // Timeout - show error
+                            document.querySelector('#ecs_container').innerHTML = 
+                                '<div class="text-center text-danger"><i class="fas fa-exclamation-triangle"></i><br><small>Timeout waiting for IP address</small></div>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error checking task status:', error);
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkForIP, checkInterval);
+                        } else {
+                            document.querySelector('#ecs_container').innerHTML = 
+                                '<div class="text-center text-danger"><i class="fas fa-exclamation-triangle"></i><br><small>Error retrieving IP address</small></div>';
+                        }
+                    });
+            } else {
+                // Task not found yet, continue checking
+                if (attempts < maxAttempts) {
+                    setTimeout(checkForIP, checkInterval);
+                } else {
+                    // Timeout - show error
+                    document.querySelector('#ecs_container').innerHTML = 
+                        '<div class="text-center text-danger"><i class="fas fa-exclamation-triangle"></i><br><small>Timeout waiting for task to start</small></div>';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error checking ECS status:', error);
+            if (attempts < maxAttempts) {
+                setTimeout(checkForIP, checkInterval);
+            } else {
+                document.querySelector('#ecs_container').innerHTML = 
+                    '<div class="text-center text-danger"><i class="fas fa-exclamation-triangle"></i><br><small>Error checking task status</small></div>';
+            }
+        });
+    };
+    
+    // Start checking
+    checkForIP();
+}
+
+function show_final_status(challenge, taskItem, publicIP) {
+    // Create the final status display
+    const containerId = String(taskItem.instance_id).replaceAll(":", "_").replaceAll("/", "_");
+    document.querySelector('#ecs_container').innerHTML = 
+        `<div class="mt-2" id="${containerId}_revert_container"></div><div class="mt-2" id="${containerId}_connect_to_container"></div>`;
+    
+    const revert_section = document.querySelector(`#${containerId}_revert_container`);
+    const connect_section = document.querySelector(`#${containerId}_connect_to_container`);
+    
+    // Show the IP and reset button
+    connect_section.innerHTML = `<span class="text-success"><strong>IP: ${publicIP}</strong></span>`;
+    revert_section.innerHTML = `<a onclick="start_container('${challenge}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a>`;
 }
 
 function stop_container(challenge, task_id, refresh = true) {
