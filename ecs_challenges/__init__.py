@@ -654,9 +654,17 @@ def get_address_of_task_container(ecs, task, container_name):
     if ecs.guacamole_address:
         containers = task["containers"]
 
+        if not container_name:
+            return None
+
         container = list(
             filter(lambda container: container["name"] == container_name, containers)
-        )[0]
+        )
+        
+        if not container:
+            return None
+            
+        container = container[0]
 
         network_interfaces = container["networkInterfaces"]
 
@@ -1308,9 +1316,9 @@ class TaskStatus(Resource):
             "public_ip": get_address_of_task_container(
                 ecs,
                 taskInstance,
-                challenge.entrypoint_container,
+                ecs.entrypoint_container,
             )
-            if not ecs.guacamole_address
+            if not ecs.guacamole_address and ecs.entrypoint_container
             else "",
         }
 
