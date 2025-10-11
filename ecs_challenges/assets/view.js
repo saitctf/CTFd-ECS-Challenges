@@ -53,12 +53,13 @@ function get_ecs_status(challenge) {
                     let currentSecond = Math.floor(new Date().getTime() / 1000);
                     let deltaSecond = Math.floor((currentSecond - initSecond) / 5);
                     let funny_words = [
-                        'Provisioning ECS tasks...',
-                        'Creating Security Groups...',
-                        'Getting Guacamole ready...',
-                        'Injecting flags...',
-                        'Creating IAM roles...',
-                        'Creating policies...'
+                        'Provisioning container challenge...',
+                        'Doing stuff and things...',
+                        'Injecting stuff...',
+                        'Downloading viruses to your computer...',
+                        'Almost ready...',
+                        'Need coffee...',
+                        'Killing time...'
                     ]
 
                     if (item.guacamole) {
@@ -142,8 +143,8 @@ function wait_for_ip_and_show_status(challenge) {
         
         // Update spinner message
         const statusMessages = [
-            'Provisioning challenge...',
-            'Getting stuff ready...',
+            'Provisioning containerchallenge...',
+            'Doing stuff and things...',
             'Injecting stuff...',
             'Downloading viruses to your computer...',
             'Almost ready...',
