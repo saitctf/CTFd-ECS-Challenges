@@ -754,115 +754,115 @@ def create_task(
 
         session = get_current_user()
 
-    owner = session.name
+        owner = session.name
 
-    owner = hashlib.md5(owner.encode("utf-8")).hexdigest()[:10]
+        owner = hashlib.md5(owner.encode("utf-8")).hexdigest()[:10]
 
-    # Get the flags on the challenge
-    flags = Flags.query.filter_by(challenge_id=challenge_id).all()
+        # Get the flags on the challenge
+        flags = Flags.query.filter_by(challenge_id=challenge_id).all()
 
-    challenge = ECSChallenge.query.filter_by(id=challenge_id).first()
+        challenge = ECSChallenge.query.filter_by(id=challenge_id).first()
 
-    # First we should check if the user already has a running task
-    if not is_admin():
-        if len(ECSChallengeTracker.query.filter_by(owner_id=session.id).all()):
-            tracker = ECSChallengeTracker.query.filter_by(owner_id=session.id).first()
-            challenge = ECSChallenge.query.filter_by(id=tracker.challenge_id).first()
-            return False, [
-                "You already have a running task!",
-                challenge.name,
-                tracker.challenge_id,
-                tracker.instance_id,
-            ]
-
-    # Prevent starting a task if the user/team has a solve on this challenge already
-    if not is_admin():
-        if is_teams_mode():
-            if len(
-                Solves.query.filter_by(
-                    challenge_id=challenge.id, team_id=get_current_team().id
-                ).all()
-            ):
-                return False, ["You have already solved this task!"]
-        else:
-            if len(
-                Solves.query.filter_by(
-                    challenge_id=challenge.id, user_id=get_current_user().id
-                ).all()
-            ):
-                return False, ["You have already solved this task!"]
-
-    # Prevent users from starting tasks when the CTF is paused
-    if not is_admin() and get_config("paused", 0) == 1:
-        return False, ["Cannot start challenges whilst CTF is paused!"]
-
-    environment_variables = [
-        (
-            f"FLAG_{idx}",
-            f"{flag.content if flag.type != 'static' else flag.content.replace('{flag}', f'{{{random_flag}}}')}",
-        )
-        for idx, flag in enumerate(flags)
-    ]
-
-    flag_containers = json.loads(challenge.flag_containers)
-
-    if challenge.ssh_container in flag_containers:
-        environment_variables.append(
-            ("SSH_KEY", os.environ.get("CONTAINER_SSH_PUBLIC_KEY", ""))
-        )
-
-    try:
-        aws_response = ecs_client.run_task(
-            cluster=ecs.cluster,
-            taskDefinition=task_definition,
-            launchType="FARGATE" if challenge.launch_type == "fargate" else "EC2",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "assignPublicIp": "DISABLED"
-                    if ecs.guacamole_address
-                    else "ENABLED",
-                    "subnets": subnets,
-                    "securityGroups": [security_group],
-                }
-            },
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": container,
-                        "environment": [
-                            {"name": name, "value": flag}
-                            for (name, flag) in environment_variables
-                        ],
-                    }
-                    for container in flag_containers
+        # First we should check if the user already has a running task
+        if not is_admin():
+            if len(ECSChallengeTracker.query.filter_by(owner_id=session.id).all()):
+                tracker = ECSChallengeTracker.query.filter_by(owner_id=session.id).first()
+                challenge = ECSChallenge.query.filter_by(id=tracker.challenge_id).first()
+                return False, [
+                    "You already have a running task!",
+                    challenge.name,
+                    tracker.challenge_id,
+                    tracker.instance_id,
                 ]
-                + (
-                    [
+
+        # Prevent starting a task if the user/team has a solve on this challenge already
+        if not is_admin():
+            if is_teams_mode():
+                if len(
+                    Solves.query.filter_by(
+                        challenge_id=challenge.id, team_id=get_current_team().id
+                    ).all()
+                ):
+                    return False, ["You have already solved this task!"]
+            else:
+                if len(
+                    Solves.query.filter_by(
+                        challenge_id=challenge.id, user_id=get_current_user().id
+                    ).all()
+                ):
+                    return False, ["You have already solved this task!"]
+
+        # Prevent users from starting tasks when the CTF is paused
+        if not is_admin() and get_config("paused", 0) == 1:
+            return False, ["Cannot start challenges whilst CTF is paused!"]
+
+        environment_variables = [
+            (
+                f"FLAG_{idx}",
+                f"{flag.content if flag.type != 'static' else flag.content.replace('{flag}', f'{{{random_flag}}}')}",
+            )
+            for idx, flag in enumerate(flags)
+        ]
+
+        flag_containers = json.loads(challenge.flag_containers)
+
+        if challenge.ssh_container in flag_containers:
+            environment_variables.append(
+                ("SSH_KEY", os.environ.get("CONTAINER_SSH_PUBLIC_KEY", ""))
+            )
+
+        try:
+            aws_response = ecs_client.run_task(
+                cluster=ecs.cluster,
+                taskDefinition=task_definition,
+                launchType="FARGATE" if challenge.launch_type == "fargate" else "EC2",
+                networkConfiguration={
+                    "awsvpcConfiguration": {
+                        "assignPublicIp": "DISABLED"
+                        if ecs.guacamole_address
+                        else "ENABLED",
+                        "subnets": subnets,
+                        "securityGroups": [security_group],
+                    }
+                },
+                overrides={
+                    "containerOverrides": [
                         {
-                            "name": challenge.ssh_container,
+                            "name": container,
                             "environment": [
-                                {
-                                    "name": "SSH_KEY",
-                                    "value": os.environ.get(
-                                        "CONTAINER_SSH_PUBLIC_KEY", ""
-                                    ),
-                                }
+                                {"name": name, "value": flag}
+                                for (name, flag) in environment_variables
                             ],
                         }
+                        for container in flag_containers
                     ]
-                    if challenge.ssh_container
-                    and challenge.ssh_container not in flag_containers
-                    else []
-                ),
-            },
-            tags=[
-                {"key": "ChallengeID", "value": f"{challenge_id}"},
-                {"key": "OwnerID", "value": f"{session.id}"},
-            ],
-            placementConstraints=[{"type": "distinctInstance"}]
-            if challenge.launch_type == "ec2"
-            else [],
-        )
+                    + (
+                        [
+                            {
+                                "name": challenge.ssh_container,
+                                "environment": [
+                                    {
+                                        "name": "SSH_KEY",
+                                        "value": os.environ.get(
+                                            "CONTAINER_SSH_PUBLIC_KEY", ""
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                        if challenge.ssh_container
+                        and challenge.ssh_container not in flag_containers
+                        else []
+                    ),
+                },
+                tags=[
+                    {"key": "ChallengeID", "value": f"{challenge_id}"},
+                    {"key": "OwnerID", "value": f"{session.id}"},
+                ],
+                placementConstraints=[{"type": "distinctInstance"}]
+                if challenge.launch_type == "ec2"
+                else [],
+            )
         except Exception as e:
             print("Failed to start challenge! (Call to run_task threw!)")
             print(repr(e))
