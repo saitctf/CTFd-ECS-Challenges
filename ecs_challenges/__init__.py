@@ -1398,28 +1398,50 @@ class TaskStatus(Resource):
         public_ip = ""
         print(f"DEBUG: Getting public IP - guacamole_address: {ecs.guacamole_address}, entrypoint_container: {ecs.entrypoint_container}")
         
-        if not ecs.guacamole_address and ecs.entrypoint_container:
-            print(f"DEBUG: Attempting to get IP for task: {taskInstance}, container: {ecs.entrypoint_container}")
-            try:
-                public_ip = get_address_of_task_container(
-                    ecs,
-                    taskInstance,
-                    ecs.entrypoint_container,
-                ) or ""
-                print(f"DEBUG: Retrieved IP: {public_ip}")
-            except Exception as e:
-                print(f"DEBUG: Error getting IP: {e}")
-                import traceback
-                traceback.print_exc()
-                public_ip = ""
+        if not ecs.guacamole_address:
+            # Determine which container to use for IP retrieval
+            container_name = ecs.entrypoint_container
             
-            # Update the host field in the tracker if we got an IP and it's different
-            if public_ip and challenge_tracker.host != public_ip:
-                print(f"DEBUG: Updating host field from '{challenge_tracker.host}' to '{public_ip}'")
-                challenge_tracker.host = public_ip
-                db.session.commit()
+            # Fallback: if no entrypoint_container is configured, try to get the first container from the task
+            if not container_name:
+                print("DEBUG: No entrypoint_container configured, attempting to get first container from task")
+                try:
+                    task_info = ecs_client.describe_tasks(cluster=ecs.cluster, tasks=[taskInstance])["tasks"][0]
+                    containers = task_info.get("containers", [])
+                    if containers:
+                        container_name = containers[0]["name"]
+                        print(f"DEBUG: Using first container as fallback: {container_name}")
+                    else:
+                        print("DEBUG: No containers found in task")
+                        container_name = None
+                except Exception as e:
+                    print(f"DEBUG: Error getting container fallback: {e}")
+                    container_name = None
+            
+            if container_name:
+                print(f"DEBUG: Attempting to get IP for task: {taskInstance}, container: {container_name}")
+                try:
+                    public_ip = get_address_of_task_container(
+                        ecs,
+                        taskInstance,
+                        container_name,
+                    ) or ""
+                    print(f"DEBUG: Retrieved IP: {public_ip}")
+                except Exception as e:
+                    print(f"DEBUG: Error getting IP: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    public_ip = ""
+                
+                # Update the host field in the tracker if we got an IP and it's different
+                if public_ip and challenge_tracker.host != public_ip:
+                    print(f"DEBUG: Updating host field from '{challenge_tracker.host}' to '{public_ip}'")
+                    challenge_tracker.host = public_ip
+                    db.session.commit()
+            else:
+                print("DEBUG: No container name available for IP retrieval")
         else:
-            print(f"DEBUG: Skipping IP retrieval - guacamole_address: {bool(ecs.guacamole_address)}, entrypoint_container: {bool(ecs.entrypoint_container)}")
+            print(f"DEBUG: Skipping IP retrieval - using Guacamole mode")
 
         return {
             "success": True,
