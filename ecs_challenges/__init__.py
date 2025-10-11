@@ -1236,14 +1236,31 @@ class TaskAPI(Resource):
         )
 
         if success:
+            # Try to get the public IP immediately after task creation
+            task_arn = result["tasks"][0]["taskArn"]
+            public_ip = ""
+            
+            # Only try to get IP if not using Guacamole and entrypoint_container is configured
+            if not ecs.guacamole_address and ecs.entrypoint_container:
+                try:
+                    public_ip = get_address_of_task_container(
+                        ecs,
+                        task_arn,
+                        ecs.entrypoint_container,
+                    ) or ""
+                except Exception as e:
+                    print(f"Warning: Could not retrieve IP immediately after task creation: {e}")
+                    public_ip = ""
+            
             entry = ECSChallengeTracker(
                 owner_id=session.id,
                 challenge_id=challenge.id,
                 task_definition=challenge.task_definition,
                 timestamp=unix_time(datetime.utcnow()),
                 revert_time=unix_time(datetime.utcnow()) + 30,
-                instance_id=result["tasks"][0]["taskArn"],
+                instance_id=task_arn,
                 ports="",
+                host=public_ip,
                 flag=flag,
             )
 
@@ -1269,6 +1286,10 @@ class TaskStatus(Resource):
     @authed_only
     def get(self):
         ecs = ECSConfig.query.filter_by(id=1).first()
+        
+        if not ecs:
+            print("DEBUG: No ECS configuration found")
+            return {"success": False, "data": [], "error": "No ECS configuration found"}
 
         ecs_client = boto3.client(
             "ecs",
@@ -1279,6 +1300,11 @@ class TaskStatus(Resource):
         )
 
         taskInstance = request.args.get("taskInst")
+        
+        # URL decode the task instance if it's encoded
+        if taskInstance:
+            import urllib.parse
+            taskInstance = urllib.parse.unquote(taskInstance)
 
         session = get_current_user()
 
@@ -1287,10 +1313,13 @@ class TaskStatus(Resource):
         ).first()
 
         if not challenge_tracker:
-            return {"success": False, "data": []}
+            print(f"DEBUG: No challenge tracker found for taskInstance: {taskInstance}")
+            print(f"DEBUG: Available trackers: {[t.instance_id for t in ECSChallengeTracker.query.all()]}")
+            return {"success": False, "data": [], "error": "No challenge tracker found"}
 
         if challenge_tracker.owner_id != session.id:
-            return {"success": False, "data": []}
+            print(f"DEBUG: Owner mismatch - tracker owner: {challenge_tracker.owner_id}, session id: {session.id}")
+            return {"success": False, "data": [], "error": "Owner mismatch"}
 
         challenge = ECSChallenge.query.filter_by(
             id=challenge_tracker.challenge_id
@@ -1310,16 +1339,26 @@ class TaskStatus(Resource):
             and container["healthStatus"] != "HEALTHY"
         ]
 
-        return {
-            "success": True,
-            "data": {"healthy": not any(containers)},
-            "public_ip": get_address_of_task_container(
+        is_healthy = not any(containers)
+        
+        # Get the public IP
+        public_ip = ""
+        if not ecs.guacamole_address and ecs.entrypoint_container:
+            public_ip = get_address_of_task_container(
                 ecs,
                 taskInstance,
                 ecs.entrypoint_container,
-            )
-            if not ecs.guacamole_address and ecs.entrypoint_container
-            else "",
+            ) or ""
+            
+            # Update the host field in the tracker if we got an IP and it's different
+            if public_ip and challenge_tracker.host != public_ip:
+                challenge_tracker.host = public_ip
+                db.session.commit()
+
+        return {
+            "success": True,
+            "data": {"healthy": is_healthy},
+            "public_ip": public_ip,
         }
 
 
