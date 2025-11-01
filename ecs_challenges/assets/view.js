@@ -142,7 +142,7 @@ function wait_for_ip_and_show_status(challenge) {
     const checkForIP = () => {
         attempts++;
         
-        // Update spinner message - cycle through all messages every 3 seconds
+        // Update spinner message
         const statusMessages = [
             'Provisioning container challenge...',
             'Doing stuff and things...',
@@ -152,8 +152,7 @@ function wait_for_ip_and_show_status(challenge) {
             'Need coffee...',
             'Killing time...'
         ];
-        // Cycle through messages every 3 seconds (change every 3 attempts)
-        const messageIndex = Math.floor(attempts / 3) % statusMessages.length;
+        const messageIndex = Math.min(Math.floor(attempts / 3), statusMessages.length - 1);
         document.querySelector('#ecs_container').innerHTML = 
             `<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i><br><small>${statusMessages[messageIndex]}</small></div>`;
         
