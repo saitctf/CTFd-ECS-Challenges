@@ -1704,7 +1704,7 @@ def load(app):
     CTFd_API_v1.add_namespace(container_namespace, "/containers")
     CTFd_API_v1.add_namespace(connect_namespace, "/connect")
     CTFd_API_v1.add_namespace(active_ecs_namespace, "/ecs_status")
-    CTFd_API_v1.add_namespace(kill_task, "/nuke")
+    CTFd_API_v1.add_namespace(kill_task, "/ecs_nuke")
 
     # Attempt to perform initial setup of the ECS Config from environment variables
 

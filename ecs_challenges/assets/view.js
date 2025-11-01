@@ -236,11 +236,26 @@ function show_final_status(challenge, taskItem, publicIP) {
 function stop_container(challenge, task_id, refresh = true) {
     running = false;
     document.querySelector('#ecs_container').innerHTML = '<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i></div>';
-    fetch(`/api/v1/nuke?${new URLSearchParams({ 'task': task_id })}`).then(result => {
-        if (refresh) {
-            get_ecs_status(challenge);
-        }
-    })
+    fetch(`/api/v1/ecs_nuke?${new URLSearchParams({ 'task': task_id })}`, {method: 'POST'})
+        .then(result => result.json())
+        .then(data => {
+            if (data.success) {
+                if (refresh) {
+                    get_ecs_status(challenge);
+                }
+            } else {
+                console.error('Failed to stop container:', data.error || 'Unknown error');
+                if (refresh) {
+                    get_ecs_status(challenge);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error stopping container:', error);
+            if (refresh) {
+                get_ecs_status(challenge);
+            }
+        });
 }
 
 function connect_to_container(challenge, protocol) {
