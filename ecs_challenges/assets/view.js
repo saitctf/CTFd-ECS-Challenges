@@ -59,7 +59,8 @@ function get_ecs_status(challenge) {
                         'Downloading viruses to your computer...',
                         'Almost ready...',
                         'Need coffee...',
-                        'Killing time...'
+                        'Killing time...',
+                        'Killing in the name of...'
                     ]
 
                     if (item.guacamole) {
@@ -141,9 +142,9 @@ function wait_for_ip_and_show_status(challenge) {
     const checkForIP = () => {
         attempts++;
         
-        // Update spinner message
+        // Update spinner message - cycle through all messages every 3 seconds
         const statusMessages = [
-            'Provisioning containerchallenge...',
+            'Provisioning container challenge...',
             'Doing stuff and things...',
             'Injecting stuff...',
             'Downloading viruses to your computer...',
@@ -151,7 +152,8 @@ function wait_for_ip_and_show_status(challenge) {
             'Need coffee...',
             'Killing time...'
         ];
-        const messageIndex = Math.min(Math.floor(attempts / 10), statusMessages.length - 1);
+        // Cycle through messages every 3 seconds (change every 3 attempts)
+        const messageIndex = Math.floor(attempts / 3) % statusMessages.length;
         document.querySelector('#ecs_container').innerHTML = 
             `<div class="text-center"><i class="fas fa-circle-notch fa-spin fa-1x"></i><br><small>${statusMessages[messageIndex]}</small></div>`;
         
