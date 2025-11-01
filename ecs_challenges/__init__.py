@@ -1667,11 +1667,31 @@ class ECSConfigAPI(Resource):
     def get(self):
         ecs = ECSConfig.query.filter_by(id=1).first()
 
-        if ecs is None or None in [ecs.subnets, ecs.security_groups]:
+        if ecs is None:
             return {"success": False, "data": {}}
         
-        subnets = json.loads(ecs.subnets)
-        security_groups = json.loads(ecs.security_groups)
+        # Fetch subnets and security groups fresh from AWS instead of using cached data
+        # This ensures newly created resources are immediately available
+        subnets = []
+        security_groups = []
+        
+        if ecs.active_vpc:
+            try:
+                subnets = get_subnets(ecs, ecs.active_vpc)
+                security_groups = get_security_groups(ecs, ecs.active_vpc)
+            except Exception as e:
+                print(f"ERROR: Failed to fetch fresh subnets/security groups: {str(e)}")
+                # Fall back to cached data if fresh fetch fails
+                if ecs.subnets:
+                    subnets = json.loads(ecs.subnets)
+                if ecs.security_groups:
+                    security_groups = json.loads(ecs.security_groups)
+        else:
+            # If no VPC is selected, use cached data as fallback
+            if ecs.subnets:
+                subnets = json.loads(ecs.subnets)
+            if ecs.security_groups:
+                security_groups = json.loads(ecs.security_groups)
 
         return {
             "success": True,
