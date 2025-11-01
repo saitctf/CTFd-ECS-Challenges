@@ -1118,25 +1118,32 @@ class ECSChallengeType(BaseChallenge):
 
         data = request.form or request.get_json()
 
-        # Get the flag from the challenge the user is attempting
+        # Get the flag from the challenge the user is attempting (may be None if container isn't running)
         challengetracker = ECSChallengeTracker.query.filter_by(
             challenge_id=challenge.id, owner_id=get_current_user().id
         ).first()
 
-        if challengetracker is None:
-            return False, "Failed to find challenge task!"
-
-        data = request.form or request.get_json()
         submission = data["submission"].strip()
         flags = Flags.query.filter_by(challenge_id=challenge.id).all()
 
         for flag in flags:
             if flag.type == "static":
-                saved = flag.content.replace("{flag}", f"{{{challengetracker.flag}}}")
+                # Check if this flag uses the {flag} placeholder
+                if "{flag}" in flag.content:
+                    # If flag uses {flag} placeholder, we need the tracker
+                    if challengetracker is None:
+                        # Skip flags that require a running container, continue checking other flags
+                        continue
+                    saved = flag.content.replace("{flag}", f"{{{challengetracker.flag}}}")
+                else:
+                    # Flag doesn't use {flag} placeholder, can validate without tracker
+                    saved = flag.content
+                
                 data = flag.data
 
                 if len(saved) != len(submission):
-                    return False, "Incorrect"
+                    continue  # Try next flag
+
                 result = 0
 
                 if data == "case_insensitive":
@@ -1148,12 +1155,13 @@ class ECSChallengeType(BaseChallenge):
 
                 if result == 0:
                     return True, "Correct"
-                else:
-                    return False, "Incorrect"
 
             else:
+                # Non-static flags don't require a tracker
                 if get_flag_class(flag.type).compare(flag, submission):
                     return True, "Correct"
+        
+        # No flags matched
         return False, "Incorrect"
 
     @staticmethod
@@ -1177,8 +1185,10 @@ class ECSChallengeType(BaseChallenge):
             .filter_by(owner_id=user.id)
             .first()
         )
-        stop_task(ecs, ecs_task.instance_id)
-        ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
+        # Only stop and delete the task if it exists (container was running)
+        if ecs_task is not None:
+            stop_task(ecs, ecs_task.instance_id)
+            ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
 
         solve = Solves(
             user_id=user.id,
