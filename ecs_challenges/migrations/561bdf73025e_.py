@@ -1,7 +1,7 @@
-"""empty message
+"""Add guide column to ecs_challenge and guide_enabled to ecs_config
 
 Revision ID: 561bdf73025e
-Revises: 46a278193a94
+Revises: 0012477fe0a8
 Create Date: 2023-09-12 13:32:03.684063
 
 """

@@ -1,4 +1,4 @@
-"""empty message
+"""Make guide column non-nullable with default value
 
 Revision ID: 8fb71d82c1e7
 Revises: 561bdf73025e
