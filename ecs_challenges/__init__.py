@@ -1816,12 +1816,9 @@ class ECSConfigStatusAPI(Resource):
 
 
 def load(app):
-    try:
-        upgrade(plugin_name="ecs_challenges")
-    except Exception as e:
-        # Skip Alembic migration errors - database schema is already correct
-        print(f"WARNING: Alembic migration error - skipping upgrade: {e}")
-        print("Database schema is already up to date, continuing plugin load...")
+    # Skip Alembic migrations entirely - database schema is already correct
+    # upgrade() is not called to avoid any revision reference issues
+    pass
 
     CHALLENGE_CLASSES["ecs"] = ECSChallengeType
     register_plugin_assets_directory(app, base_path="/plugins/ecs_challenges/assets")
