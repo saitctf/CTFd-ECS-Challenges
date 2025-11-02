@@ -1155,7 +1155,7 @@ class ECSChallengeType(BaseChallenge):
                     if challengetracker is None:
                         # Skip flags that require a running container, continue checking other flags
                         continue
-                    saved = flag.content.replace("{flag}", f"{{{challengetracker.flag}}}")
+                saved = flag.content.replace("{flag}", f"{{{challengetracker.flag}}}")
                 else:
                     # Flag doesn't use {flag} placeholder, can validate without tracker
                     saved = flag.content
@@ -1211,7 +1211,7 @@ class ECSChallengeType(BaseChallenge):
         # Always attempt to nuke the container when the correct flag is submitted
         if ecs_task is not None:
             try:
-                stop_task(ecs, ecs_task.instance_id)
+        stop_task(ecs, ecs_task.instance_id)
                 print(f"Successfully stopped task {ecs_task.instance_id} for solved challenge {challenge.id}")
             except Exception as e:
                 print(f"Error stopping task {ecs_task.instance_id}: {str(e)}")
@@ -1219,7 +1219,7 @@ class ECSChallengeType(BaseChallenge):
             
             # Delete the tracker record (will be committed with the solve below)
             try:
-                ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
+        ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
             except Exception as e:
                 print(f"Error deleting tracker for task {ecs_task.instance_id}: {str(e)}")
 
@@ -1287,7 +1287,7 @@ class TaskAPI(Resource):
             
             if should_cleanup:
                 try:
-                    stop_task(ecs, i.instance_id)
+                stop_task(ecs, i.instance_id)
                 except Exception as e:
                     print(f"Error stopping expired task {i.instance_id}: {str(e)}")
                 ECSChallengeTracker.query.filter_by(instance_id=i.instance_id).delete()
@@ -1483,8 +1483,8 @@ class TaskStatus(Resource):
                 print(f"DEBUG: Attempting to get IP for task: {taskInstance}, container: {container_name}")
                 try:
                     public_ip = get_address_of_task_container(
-                        ecs,
-                        taskInstance,
+                ecs,
+                taskInstance,
                         container_name,
                     ) or ""
                     print(f"DEBUG: Retrieved IP: {public_ip}")
@@ -1780,7 +1780,7 @@ class ECSConfigAPI(Resource):
                 print(f"ERROR: Failed to fetch fresh subnets/security groups: {str(e)}")
                 # Fall back to cached data if fresh fetch fails
                 if ecs.subnets:
-                    subnets = json.loads(ecs.subnets)
+        subnets = json.loads(ecs.subnets)
                 if ecs.security_groups:
                     security_groups = json.loads(ecs.security_groups)
         else:
@@ -1788,7 +1788,7 @@ class ECSConfigAPI(Resource):
             if ecs.subnets:
                 subnets = json.loads(ecs.subnets)
             if ecs.security_groups:
-                security_groups = json.loads(ecs.security_groups)
+        security_groups = json.loads(ecs.security_groups)
 
         return {
             "success": True,
@@ -1816,13 +1816,7 @@ class ECSConfigStatusAPI(Resource):
 
 
 def load(app):
-    # Call upgrade to ensure migrations are run if needed
-    # The migration files exist and are properly chained
-    try:
-        upgrade(plugin_name="ecs_challenges")
-    except Exception as e:
-        # If upgrade fails, log but continue - database might already be up to date
-        print(f"WARNING: Alembic upgrade encountered an error (this may be OK if schema is already correct): {e}")
+    upgrade(plugin_name="ecs_challenges")
 
     CHALLENGE_CLASSES["ecs"] = ECSChallengeType
     register_plugin_assets_directory(app, base_path="/plugins/ecs_challenges/assets")
