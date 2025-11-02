@@ -64,7 +64,7 @@ class ECSChallenge(Challenges):
     flag_containers = db.Column(db.Text)
 
     guide = db.Column(db.Text, default="")
-    
+
     timeout = db.Column(db.Integer, nullable=True)  # Timeout in seconds (None means no timeout)
 
 
