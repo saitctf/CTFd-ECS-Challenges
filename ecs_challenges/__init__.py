@@ -960,6 +960,16 @@ class ECSChallengeType(BaseChallenge):
             data["subnets"] = json.dumps(data["subnets"])
         if "flag_containers" in data.keys():
             data["flag_containers"] = json.dumps(data["flag_containers"])
+        # Handle timeout: convert empty string to None
+        if "timeout" in data.keys():
+            timeout_value = data["timeout"]
+            if timeout_value == "" or timeout_value is None:
+                data["timeout"] = None
+            else:
+                try:
+                    data["timeout"] = int(timeout_value)
+                except (ValueError, TypeError):
+                    data["timeout"] = None
 
         # Discover ssh_container and vnc_container
 
@@ -1041,6 +1051,7 @@ class ECSChallengeType(BaseChallenge):
             "flag_containers": challenge.flag_containers or "{}",
             "security_group": challenge.security_group,
             "launch_type": challenge.launch_type,
+            "timeout": challenge.timeout,
             "guide": challenge.guide,
             "type_data": {
                 "id": ECSChallengeType.id,
@@ -1071,6 +1082,16 @@ class ECSChallengeType(BaseChallenge):
             data["subnets"] = json.dumps(data["subnets"])
         if "flag_containers" in data.keys():
             data["flag_containers"] = json.dumps(data["flag_containers"])
+        # Handle timeout: convert empty string to None
+        if "timeout" in data.keys():
+            timeout_value = data["timeout"]
+            if timeout_value == "" or timeout_value is None:
+                data["timeout"] = None
+            else:
+                try:
+                    data["timeout"] = int(timeout_value)
+                except (ValueError, TypeError):
+                    data["timeout"] = None
 
         # Discover ssh_container and vnc_container
 
@@ -1168,6 +1189,7 @@ class ECSChallengeType(BaseChallenge):
     def solve(user, team, challenge, request):
         """
         This method is used to insert Solves into the database in order to mark a challenge as solved.
+        When the correct flag is submitted, the container is automatically nuked.
 
         :param team: The Team object from the database
         :param chal: The Challenge object from the database
@@ -1178,17 +1200,28 @@ class ECSChallengeType(BaseChallenge):
         submission = data["submission"].strip()
         ecs = ECSConfig.query.filter_by(id=1).first()
 
+        # Find the running task for this challenge and user
+        # Search by challenge_id and owner_id to ensure accuracy
         ecs_task = (
-            ECSChallengeTracker.query.filter_by(
-                task_definition=challenge.task_definition
-            )
+            ECSChallengeTracker.query.filter_by(challenge_id=challenge.id)
             .filter_by(owner_id=user.id)
             .first()
         )
-        # Only stop and delete the task if it exists (container was running)
+        
+        # Always attempt to nuke the container when the correct flag is submitted
         if ecs_task is not None:
-            stop_task(ecs, ecs_task.instance_id)
-            ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
+            try:
+                stop_task(ecs, ecs_task.instance_id)
+                print(f"Successfully stopped task {ecs_task.instance_id} for solved challenge {challenge.id}")
+            except Exception as e:
+                print(f"Error stopping task {ecs_task.instance_id}: {str(e)}")
+                # Continue even if stopping fails - we still want to record the solve
+            
+            # Delete the tracker record (will be committed with the solve below)
+            try:
+                ECSChallengeTracker.query.filter_by(instance_id=ecs_task.instance_id).delete()
+            except Exception as e:
+                print(f"Error deleting tracker for task {ecs_task.instance_id}: {str(e)}")
 
         solve = Solves(
             user_id=user.id,
@@ -1240,14 +1273,23 @@ class TaskAPI(Resource):
         tasks = ECSChallengeTracker.query.all()
 
         session = get_current_user()
+        current_time = unix_time(datetime.utcnow())
 
-        # First we'll delete all old docker containers (+2 hours)
+        # First we'll delete all old docker containers (+2 hours) or expired containers (revert_time passed)
         for i in tasks:
-            if (
-                int(session.id) == int(i.owner_id)
-                and (unix_time(datetime.utcnow()) - int(i.timestamp)) >= 7200
-            ):
-                stop_task(ecs, i.instance_id)
+            should_cleanup = False
+            # Check if container is older than 2 hours
+            if int(session.id) == int(i.owner_id) and (current_time - int(i.timestamp)) >= 7200:
+                should_cleanup = True
+            # Check if container has exceeded its timeout (revert_time has passed)
+            elif int(session.id) == int(i.owner_id) and i.revert_time is not None and current_time >= i.revert_time:
+                should_cleanup = True
+            
+            if should_cleanup:
+                try:
+                    stop_task(ecs, i.instance_id)
+                except Exception as e:
+                    print(f"Error stopping expired task {i.instance_id}: {str(e)}")
                 ECSChallengeTracker.query.filter_by(instance_id=i.instance_id).delete()
                 db.session.commit()
         check = (
@@ -1296,12 +1338,21 @@ class TaskAPI(Resource):
                     print(f"Warning: Could not retrieve IP immediately after task creation: {e}")
                     public_ip = ""
             
+            # Calculate revert_time based on challenge timeout
+            # If timeout is None or 0, set revert_time to None (no timeout)
+            # Otherwise, set revert_time to current time + timeout seconds
+            current_time = unix_time(datetime.utcnow())
+            if challenge.timeout and challenge.timeout > 0:
+                revert_time = current_time + challenge.timeout
+            else:
+                revert_time = None
+            
             entry = ECSChallengeTracker(
                 owner_id=session.id,
                 challenge_id=challenge.id,
                 task_definition=challenge.task_definition,
-                timestamp=unix_time(datetime.utcnow()),
-                revert_time=unix_time(datetime.utcnow()) + 30,
+                timestamp=current_time,
+                revert_time=revert_time,
                 instance_id=task_arn,
                 ports="",
                 host=public_ip,
@@ -1655,6 +1706,52 @@ class ECSAPI(Resource):
             }, 400
 
 
+cleanup_namespace = Namespace(
+    "cleanup",
+    description="Endpoint to cleanup expired ECS containers based on timeout",
+)
+
+
+@cleanup_namespace.route("", methods=["GET", "POST"])
+class CleanupAPI(Resource):
+    @admins_only
+    def get(self):
+        """
+        Cleanup endpoint to nuke all containers that have exceeded their timeout.
+        Can be called periodically (e.g., via cron) to automatically clean up expired containers.
+        """
+        ecs = ECSConfig.query.filter_by(id=1).first()
+        if ecs is None:
+            return {"success": False, "message": "ECS config not found"}, 400
+        
+        current_time = unix_time(datetime.utcnow())
+        all_tasks = ECSChallengeTracker.query.all()
+        cleaned_up = []
+        errors = []
+        
+        for task in all_tasks:
+            # Check if container has exceeded its timeout (revert_time has passed)
+            if task.revert_time is not None and current_time >= task.revert_time:
+                try:
+                    stop_task(ecs, task.instance_id)
+                    ECSChallengeTracker.query.filter_by(instance_id=task.instance_id).delete()
+                    db.session.commit()
+                    cleaned_up.append(task.instance_id)
+                    print(f"Cleaned up expired container: {task.instance_id}")
+                except Exception as e:
+                    error_msg = f"Error cleaning up task {task.instance_id}: {str(e)}"
+                    print(error_msg)
+                    errors.append(error_msg)
+                    db.session.rollback()
+        
+        return {
+            "success": True,
+            "cleaned_up": cleaned_up,
+            "count": len(cleaned_up),
+            "errors": errors
+        }
+
+
 ecs_config_namespace = Namespace(
     "ecs_config",
     description="Endpoint for admins to be able to retreive information about the configuration",
@@ -1735,6 +1832,7 @@ def load(app):
     CTFd_API_v1.add_namespace(connect_namespace, "/connect")
     CTFd_API_v1.add_namespace(active_ecs_namespace, "/ecs_status")
     CTFd_API_v1.add_namespace(kill_task, "/ecs_nuke")
+    CTFd_API_v1.add_namespace(cleanup_namespace, "/ecs_cleanup")
 
     # Attempt to perform initial setup of the ECS Config from environment variables
 
