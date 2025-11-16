@@ -71,7 +71,7 @@ function get_ecs_status(challenge) {
                                         running = true;
                                         connect_section.innerHTML = ``;
                                         clearInterval(status_check_interval);
-                                        revert_section.innerHTML = `<a onclick="start_container('${item.challenge_id}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a>`;
+                                        revert_section.innerHTML = `<a onclick="start_container('${item.challenge_id}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a> <a onclick="stop_container('${item.challenge_id}', '${item.instance_id}', true);" class='btn btn-warning'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-stop"></i>Stop Challenge</small></a>`;
                                         if (item.ssh)
                                             connect_section.innerHTML += `<a onclick="connect_to_container('${item.challenge_id}', 'ssh');" class='btn btn-success'><small style='color:white;'>Connect to Terminal</small></a>`;
                                         if (item.vnc)
@@ -90,7 +90,7 @@ function get_ecs_status(challenge) {
                                         running = true;
                                         connect_section.innerHTML = `<span>IP: ${result['public_ip']}</small>`;
                                         clearInterval(status_check_interval);
-                                        revert_section.innerHTML = `<a onclick="start_container('${item.challenge_id}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a>`;
+                                        revert_section.innerHTML = `<a onclick="start_container('${item.challenge_id}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a> <a onclick="stop_container('${item.challenge_id}', '${item.instance_id}', true);" class='btn btn-warning'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-stop"></i>Stop Challenge</small></a>`;
                                     } else {
                                         connect_section.innerHTML = `<span>Your container is starting, this shouldn't take longer than a minute and a half</span><br><br><br><span>${funny_words[deltaSecond % funny_words.length]}</span>`;
                                     }
@@ -231,7 +231,7 @@ function show_final_status(challenge, taskItem, publicIP) {
     
     // Show the IP and reset button
     connect_section.innerHTML = `<span class="text-success"><strong>IP: ${publicIP}</strong></span>`;
-    revert_section.innerHTML = `<a onclick="start_container('${challenge}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a>`;
+    revert_section.innerHTML = `<a onclick="start_container('${challenge}');" class='btn btn-danger'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-redo"></i>Reset Challenge</small></a> <a onclick="stop_container('${challenge}', '${taskItem.instance_id}', true);" class='btn btn-warning'><small style='color:white;'><i style='margin-right: 5px;' class="fas fa-stop"></i>Stop Challenge</small></a>`;
 }
 
 function stop_container(challenge, task_id, refresh = true) {
